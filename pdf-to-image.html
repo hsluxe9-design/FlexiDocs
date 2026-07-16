@@ -79,8 +79,13 @@ h1{font-size:clamp(28px,4.5vw,48px);font-weight:900;letter-spacing:-.03em;line-h
 .ws-side{display:flex;flex-direction:column;gap:12px;position:sticky;top:80px}
 
 /* DROPZONE */
-.dz{background:var(--white);border:2px dashed var(--border2);border-radius:18px;padding:48px 24px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+.dz{background:var(--white);border:2px dashed var(--border2);border-radius:18px;padding:48px 24px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;user-select:none;min-height:72px}
 .dz:hover,.dz.drag{border-color:var(--violet);background:rgba(109,40,217,.03)}
+.dz.has-files{padding:14px 18px;border-style:dashed}
+.dz-add-more{display:none;align-items:center;justify-content:center;gap:7px;font-size:13px;font-weight:600;color:var(--muted)}
+.dz-add-more svg{width:15px;height:15px}
+.dz.has-files .dz-add-more{display:flex}
+.dz.has-files:hover .dz-add-more{color:var(--violet)}
 #fileInput{display:none}
 .dz-icon{width:50px;height:50px;border-radius:13px;background:rgba(109,40,217,.1);display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
 .dz-icon svg{width:22px;height:22px;color:var(--violet)}
@@ -253,8 +258,8 @@ footer{border-top:1px solid var(--border);padding:48px 0 24px;background:var(--w
       <div class="ws-main">
 
         <!-- Drop zone -->
-        <div class="dz" id="dropzone" data-multiple="false">
-          <input type="file" id="fileInput" accept="application/pdf" >
+        <input type="file" id="fileInput" accept="application/pdf"  style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" tabindex="-1">
+        <label class="dz" id="dropzone" for="fileInput" data-multiple="false">
           <div id="dzPrompt">
             <div class="dz-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -263,7 +268,11 @@ footer{border-top:1px solid var(--border);padding:48px 0 24px;background:var(--w
             <div class="dz-hint">or click to browse</div>
             <div class="dz-types">Accepts PDF</div>
           </div>
-        </div>
+          <div class="dz-add-more">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            Replace file
+          </div>
+        </label>
 
         <!-- File list -->
         <div class="file-list" id="fileList"></div>
@@ -370,7 +379,7 @@ function g(id){return document.getElementById(id);}
 function show(id){g(id).removeAttribute('hidden');}
 function hide(id){g(id).setAttribute('hidden','');}
 function fmtBytes(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';}
-function escXml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escXml(s){return s.replace(/&/g,'\x26amp;').replace(/</g,'\x26lt;').replace(/>/g,'\x26gt;').replace(/"/g,'\x26quot;');}
 
 /* ── File helpers ── */
 function readDataURL(f){
@@ -596,8 +605,7 @@ async function doPdfToWord(files){
         if(line.trim()) paragraphs.push(line.trim());
         line='';
       }
-      line+=item.str+(item.hasEOL?'
-':' ');
+      line+=item.str+(item.hasEOL?'\n':' ');
       lastY=y;
     });
     if(line.trim()) paragraphs.push(line.trim());
@@ -656,8 +664,7 @@ async function doWordToPdf(files){
   var els=div.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,td,th');
   if(els.length===0){
     /* fallback: split by newlines */
-    div.innerText.split('
-').forEach(function(line){addBlock(line,12,'normal');});
+    div.innerText.split('\n').forEach(function(line){addBlock(line,12,'normal');});
   } else {
     els.forEach(function(el){
       var tag=el.tagName.toLowerCase();
@@ -751,12 +758,12 @@ async function renderFiles(){
   var list=g('fileList');
   if(!FILES.length){
     list.innerHTML='';
-    show('dzPrompt' in window?'dzPrompt':'dzPrompt');
-    g('dzPrompt').removeAttribute('hidden');
     g('dzPrompt').style.display='';
+    g('dropzone').classList.remove('has-files');
     return;
   }
   g('dzPrompt').style.display='none';
+  g('dropzone').classList.add('has-files');
   var isMulti=g('dropzone').dataset.multiple==='true';
   var canReorder=isMulti&&FILES.length>1;
 
@@ -798,6 +805,7 @@ async function renderFiles(){
   list.querySelectorAll('.ic-btn').forEach(function(btn){
     btn.addEventListener('click',function(e){
       e.stopPropagation();
+      e.preventDefault(); /* prevent label from opening file picker */
       var i=parseInt(btn.dataset.i,10);
       var act=btn.dataset.act;
       if(act==='rm'){
@@ -832,19 +840,16 @@ function addFiles(fileList){
 var dz=g('dropzone');
 var fi=g('fileInput');
 
-dz.addEventListener('click',function(e){
-  /* only open picker if clicking the zone itself or the prompt, not child buttons */
-  if(e.target===dz||e.target.closest('#dzPrompt')){
-    fi.click();
-  }
-});
+/* Click-to-browse is handled natively by the <label for="fileInput"> wrapper.
+   No JS click handler needed — this works on all browsers including iOS Safari. */
+/* ic-btn clicks still call stopPropagation to prevent label activation */ 
 fi.addEventListener('change',function(){
   if(fi.files&&fi.files.length){
     addFiles(fi.files);
     fi.value=''; /* reset so same file can be re-added */
   }
 });
-dz.addEventListener('dragenter',function(e){e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragenter',function(e){e.preventDefault();e.stopPropagation();dz.classList.add('drag');});
 dz.addEventListener('dragover',function(e){e.preventDefault();dz.classList.add('drag');});
 dz.addEventListener('dragleave',function(e){e.preventDefault();dz.classList.remove('drag');});
 dz.addEventListener('drop',function(e){
